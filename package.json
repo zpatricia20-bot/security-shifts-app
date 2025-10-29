@@ -1,0 +1,30 @@
+{
+  "name": "security-shifts",
+  "version": "1.0.0",
+  "description": "Production-ready security services shift management system",
+  "private": true,
+  "workspaces": [
+    "api",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w api\" \"npm run dev -w web\"",
+    "dev:replit": "PORT=4000 npm run dev:api & npm run dev:web",
+    "dev:api": "npm run dev -w api",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w api && npm run build -w web",
+    "start": "concurrently \"npm run start -w api\" \"npm start -w web\"",
+    "seed": "npm run seed -w api",
+    "test": "npm run test -w api",
+    "lint": "npm run lint -w api && npm run lint -w web",
+    "type-check": "npm run type-check -w api && npm run type-check -w web",
+    "db:migrate": "npm run db:migrate -w api",
+    "db:studio": "npm run db:studio -w api"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
