@@ -1,0 +1,338 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ USERS & AUTH ============
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  role      UserRole @default(OPERATOR)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  operatorId String?
+  operator   Operator? @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  OPERATOR
+  READ_ONLY
+}
+
+// ============ OPERATORS ============
+
+model Operator {
+  id                    String   @id @default(cuid())
+  fullName              String
+  phone                 String   @unique
+  codiceFiscale         String?
+  idType                String?  // "passport", "id_card", etc.
+  idNumber              String?
+  contractStatus        String?  // "active", "inactive", "pending"
+  hourlyRateCents       Int?     // In cents (e.g., 1500 = €15.00)
+  notes                 String?
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relations
+  users                 User[]
+  documents             Document[]
+  shiftAssignments      ShiftAssignment[]
+  attendanceLogs        AttendanceLog[]
+  payItems              PayItem[]
+  createdShifts         Shift[]  @relation("CreatedBy")
+  updatedShifts         Shift[]  @relation("UpdatedBy")
+  createdReviews        Review[] @relation("CreatedBy")
+
+  @@map("operators")
+}
+
+// ============ SHOPS ============
+
+model Shop {
+  id                    String   @id @default(cuid())
+  name                  String   @unique
+  address               String?
+  latitude              Float?
+  longitude             Float?
+  rulesMarkdown         String?
+  extraTasksMarkdown    String?
+  contactName           String?
+  contactPhone          String?
+  defaultHourlyRateCents Int?   // In cents
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relations
+  shifts                Shift[]
+  reviews               Review[]
+
+  @@map("shops")
+}
+
+// ============ FILES ============
+
+model File {
+  id        String   @id @default(cuid())
+  storageKey String  @unique
+  filename  String
+  mime      String
+  size      Int
+  uploaderId String?
+  createdAt DateTime @default(now())
+
+  // Relations
+  documents Document[]
+
+  @@map("files")
+}
+
+// ============ DOCUMENTS ============
+
+model Document {
+  id               String   @id @default(cuid())
+  operatorId       String
+  docType          String   // "contract", "permit", "id", "passport", etc.
+  fileId           String
+  expiryDate       DateTime?
+  notifyDaysBefore Int      @default(30)
+  lastNotifiedAt   DateTime?
+  createdAt        DateTime @default(now())
+
+  // Relations
+  operator         Operator @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+  file             File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@unique([operatorId, docType])
+  @@map("documents")
+}
+
+// ============ SHIFTS ============
+
+model Shift {
+  id                  String   @id @default(cuid())
+  shopId              String
+  date                DateTime
+  startAt             DateTime
+  endAt               DateTime
+  unpaidBreakMinutes  Int      @default(0)  // Total unpaid break time
+  notes               String?
+  status              ShiftStatus @default(PLANNED)
+  createdBy           String?
+  updatedBy           String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relations
+  shop                Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  createdByUser       Operator? @relation("CreatedBy", fields: [createdBy], references: [id])
+  updatedByUser       Operator? @relation("UpdatedBy", fields: [updatedBy], references: [id])
+  
+  assignments         ShiftAssignment[]
+  attendanceLogs      AttendanceLog[]
+  breaks              Break[]
+  payItems            PayItem[]
+  reviews             Review[]
+  notifications       Notification[]
+
+  @@index([shopId, date])
+  @@map("shifts")
+}
+
+enum ShiftStatus {
+  PLANNED
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// ============ SHIFT ASSIGNMENTS ============
+
+model ShiftAssignment {
+  id                  String   @id @default(cuid())
+  shiftId             String
+  operatorId          String
+  confirmationStatus  ConfirmationStatus @default(PENDING)
+  confirmationSentAt  DateTime?
+  confirmationAckAt   DateTime?
+  createdAt           DateTime @default(now())
+
+  // Relations
+  shift               Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  operator            Operator @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+
+  @@unique([shiftId, operatorId])
+  @@map("shift_assignments")
+}
+
+enum ConfirmationStatus {
+  PENDING
+  CONFIRMED
+  DECLINED
+  EXPIRED
+}
+
+// ============ BREAKS ============
+
+model Break {
+  id        String   @id @default(cuid())
+  shiftId   String
+  startAt   DateTime
+  endAt     DateTime
+  isUnpaid  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  // Relations
+  shift     Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@map("breaks")
+}
+
+// ============ ATTENDANCE LOGS ============
+
+model AttendanceLog {
+  id          String   @id @default(cuid())
+  shiftId     String
+  operatorId  String
+  eventType   AttendanceEventType
+  eventSource AttendanceEventSource
+  timestamp   DateTime
+  latitude    Float?
+  longitude   Float?
+  messageId   String?  // WhatsApp messageId or SMS id
+  createdAt   DateTime @default(now())
+
+  // Relations
+  shift       Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  operator    Operator @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+
+  @@index([shiftId, timestamp])
+  @@index([operatorId, timestamp])
+  @@map("attendance_logs")
+}
+
+enum AttendanceEventType {
+  CHECK_IN
+  CHECK_OUT
+  BREAK_START
+  BREAK_END
+}
+
+enum AttendanceEventSource {
+  APP
+  WHATSAPP
+  ADMIN_EDIT
+}
+
+// ============ REVIEWS ============
+
+model Review {
+  id        String   @id @default(cuid())
+  shiftId   String
+  shopId    String
+  rating    Int      // 1-5
+  comment   String?
+  createdBy String?
+  createdAt DateTime @default(now())
+
+  // Relations
+  shift     Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  creator   Operator? @relation("CreatedBy", fields: [createdBy], references: [id])
+
+  @@map("reviews")
+}
+
+// ============ PAY ITEMS ============
+
+model PayItem {
+  id            String   @id @default(cuid())
+  shiftId       String
+  operatorId    String
+  payableMinutes Int
+  rateCents     Int
+  totalCents    Int
+  calcSnapshot  Json     // Store calculation details for audit
+  periodKey     String   // YYYY-MM for grouping
+  locked        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  shift         Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  operator      Operator @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+
+  @@unique([shiftId, operatorId])
+  @@index([operatorId, periodKey])
+  @@map("pay_items")
+}
+
+// ============ NOTIFICATIONS ============
+
+model Notification {
+  id               String   @id @default(cuid())
+  kind             NotificationKind
+  toPhone          String?
+  toEmail          String?
+  templateName     String?
+  variables        Json?
+  status           NotificationStatus @default(QUEUED)
+  providerMessageId String?
+  error            String?
+  relatedShiftId   String?
+  createdAt        DateTime @default(now())
+  sentAt           DateTime?
+
+  // Relations
+  shift            Shift? @relation(fields: [relatedShiftId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@map("notifications")
+}
+
+enum NotificationKind {
+  WHATSAPP_TEMPLATE
+  WHATSAPP_FREEFORM
+  EMAIL
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+  RETRY
+}
+
+// ============ IMPORTS ============
+
+model ImportLog {
+  id        String   @id @default(cuid())
+  fileName  String
+  fileSize  Int
+  fileHash  String   @unique
+  rowCount  Int
+  status    String   // PENDING, PROCESSING, SUCCESS, FAILED
+  error     String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("import_logs")
+}
